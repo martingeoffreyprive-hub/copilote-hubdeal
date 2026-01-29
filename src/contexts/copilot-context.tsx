@@ -1,0 +1,49 @@
+"use client";
+
+import React, { createContext, useContext, useState, useCallback } from "react";
+import { CopilotMessage, CopilotSettings, VisualizerState } from "@/types/copilot";
+import { DEFAULT_COPILOT_SETTINGS } from "@/lib/constants";
+import { v4 as uuid } from "uuid";
+
+interface CopilotContextValue {
+  messages: CopilotMessage[];
+  settings: CopilotSettings;
+  visualizerState: VisualizerState;
+  isConnected: boolean;
+  addMessage: (role: "user" | "assistant" | "system", content: string, isVoice?: boolean) => void;
+  clearMessages: () => void;
+  updateSettings: (s: Partial<CopilotSettings>) => void;
+  setVisualizerState: (s: VisualizerState) => void;
+  setConnected: (v: boolean) => void;
+}
+
+const CopilotContext = createContext<CopilotContextValue | null>(null);
+
+export function CopilotProvider({ children }: { children: React.ReactNode }) {
+  const [messages, setMessages] = useState<CopilotMessage[]>([]);
+  const [settings, setSettings] = useState<CopilotSettings>(DEFAULT_COPILOT_SETTINGS);
+  const [visualizerState, setVisualizerState] = useState<VisualizerState>({ mode: "idle", levels: new Array(40).fill(0.1) });
+  const [isConnected, setConnected] = useState(false);
+
+  const addMessage = useCallback((role: "user" | "assistant" | "system", content: string, isVoice = false) => {
+    setMessages((prev) => [...prev, { id: uuid(), role, content, timestamp: new Date().toISOString(), isVoice }]);
+  }, []);
+
+  const clearMessages = useCallback(() => setMessages([]), []);
+
+  const updateSettings = useCallback((s: Partial<CopilotSettings>) => {
+    setSettings((prev) => ({ ...prev, ...s }));
+  }, []);
+
+  return (
+    <CopilotContext.Provider value={{ messages, settings, visualizerState, isConnected, addMessage, clearMessages, updateSettings, setVisualizerState, setConnected }}>
+      {children}
+    </CopilotContext.Provider>
+  );
+}
+
+export function useCopilotContext() {
+  const ctx = useContext(CopilotContext);
+  if (!ctx) throw new Error("useCopilotContext must be used within CopilotProvider");
+  return ctx;
+}
