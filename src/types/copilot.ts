@@ -13,6 +13,7 @@ export interface ModelOption {
 export type Language = "fr" | "nl" | "en" | "de";
 
 export interface CopilotSettings {
+  apiKey: string;
   voice: string;
   model: string;
   language: Language;

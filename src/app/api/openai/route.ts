@@ -1,9 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 
 export async function POST(req: NextRequest) {
-  const apiKey = process.env.OPENAI_API_KEY;
+  const clientKey = req.headers.get("x-openai-key");
+  const apiKey = clientKey || process.env.OPENAI_API_KEY;
+
   if (!apiKey) {
-    return NextResponse.json({ error: "OPENAI_API_KEY not configured" }, { status: 500 });
+    return NextResponse.json(
+      { error: "Clé API OpenAI manquante. Ajoutez-la dans les paramètres du copilote." },
+      { status: 401 }
+    );
   }
 
   try {
@@ -18,7 +23,7 @@ export async function POST(req: NextRequest) {
     });
 
     const data = await response.json();
-    return NextResponse.json(data);
+    return NextResponse.json(data, { status: response.status });
   } catch {
     return NextResponse.json({ error: "Failed to proxy request to OpenAI" }, { status: 500 });
   }

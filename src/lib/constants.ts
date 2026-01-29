@@ -42,6 +42,7 @@ export const LANGUAGES: { value: Language; label: string }[] = [
 ];
 
 export const DEFAULT_COPILOT_SETTINGS = {
+  apiKey: "",
   voice: "alloy",
   model: "gpt-4o-realtime-preview",
   language: "fr" as Language,
