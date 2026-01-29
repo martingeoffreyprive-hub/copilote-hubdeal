@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useCallback } from "react";
 import { useCopilotContext } from "@/contexts/copilot-context";
 import { GlassCard } from "@/components/ui/glass-card";
 import { MessageList } from "./message-list";
@@ -8,25 +8,55 @@ import { CopilotSettings } from "./copilot-settings";
 import { VoiceVisualizer } from "@/components/voice-visualizer/voice-visualizer";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Send, Mic, Settings, X, Loader2 } from "lucide-react";
+import { Send, Mic, MicOff, Settings, X, Loader2 } from "lucide-react";
 
 export function CopilotPanel() {
-  const { messages, settings, addMessage, isConnected } = useCopilotContext();
+  const { messages, settings, addMessage, isConnected, setVisualizerState } = useCopilotContext();
   const [input, setInput] = useState("");
   const [showSettings, setShowSettings] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
 
-  const handleSend = async () => {
-    const text = input.trim();
-    if (!text || isLoading) return;
+  const speakText = useCallback(async (text: string) => {
+    if (!settings.autoSpeak || !settings.apiKey) return;
+    try {
+      setVisualizerState({ mode: "speaking", levels: new Array(40).fill(0.5) });
+      const res = await fetch("/api/openai/tts", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-openai-key": settings.apiKey,
+        },
+        body: JSON.stringify({ input: text.slice(0, 4096), voice: settings.voice }),
+      });
+      if (res.ok) {
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const audio = new Audio(url);
+        audio.onended = () => {
+          URL.revokeObjectURL(url);
+          setVisualizerState({ mode: "idle", levels: new Array(40).fill(0.1) });
+        };
+        await audio.play();
+      } else {
+        setVisualizerState({ mode: "idle", levels: new Array(40).fill(0.1) });
+      }
+    } catch {
+      setVisualizerState({ mode: "idle", levels: new Array(40).fill(0.1) });
+    }
+  }, [settings.autoSpeak, settings.apiKey, settings.voice, setVisualizerState]);
+
+  const sendToChat = useCallback(async (text: string, isVoice = false) => {
+    if (!text.trim() || isLoading) return;
 
     if (!settings.apiKey) {
       addMessage("system", "Veuillez d'abord entrer votre clé API OpenAI dans les paramètres (icône engrenage).");
       return;
     }
 
-    addMessage("user", text);
-    setInput("");
+    addMessage("user", text.trim(), isVoice);
     setIsLoading(true);
 
     try {
@@ -39,7 +69,7 @@ export function CopilotPanel() {
           role: m.role as "user" | "assistant",
           content: m.content,
         })),
-        { role: "user" as const, content: text },
+        { role: "user" as const, content: text.trim() },
       ];
 
       const res = await fetch("/api/openai", {
@@ -60,7 +90,11 @@ export function CopilotPanel() {
       if (!res.ok) {
         addMessage("system", data.error?.message || data.error || `Erreur ${res.status}`);
       } else if (data.choices?.[0]?.message?.content) {
-        addMessage("assistant", data.choices[0].message.content);
+        const reply = data.choices[0].message.content;
+        addMessage("assistant", reply);
+        if (isVoice || settings.autoSpeak) {
+          speakText(reply);
+        }
       } else {
         addMessage("system", "Réponse inattendue de l'API.");
       }
@@ -68,6 +102,78 @@ export function CopilotPanel() {
       addMessage("system", `Erreur réseau: ${err instanceof Error ? err.message : "inconnue"}`);
     } finally {
       setIsLoading(false);
+    }
+  }, [isLoading, settings.apiKey, settings.autoSpeak, messages, addMessage, speakText]);
+
+  const handleSend = () => {
+    sendToChat(input);
+    setInput("");
+  };
+
+  const toggleRecording = async () => {
+    if (isRecording) {
+      // Stop recording
+      mediaRecorderRef.current?.stop();
+      return;
+    }
+
+    if (!settings.apiKey) {
+      addMessage("system", "Veuillez d'abord entrer votre clé API OpenAI dans les paramètres.");
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream, {
+        mimeType: MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+          ? "audio/webm;codecs=opus"
+          : "audio/webm",
+      });
+      mediaRecorderRef.current = mediaRecorder;
+      chunksRef.current = [];
+
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) chunksRef.current.push(e.data);
+      };
+
+      mediaRecorder.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop());
+        setIsRecording(false);
+        setVisualizerState({ mode: "idle", levels: new Array(40).fill(0.1) });
+
+        const audioBlob = new Blob(chunksRef.current, { type: "audio/webm" });
+        if (audioBlob.size < 100) return;
+
+        setIsLoading(true);
+        try {
+          const formData = new FormData();
+          formData.append("file", audioBlob, "audio.webm");
+          formData.append("language", settings.language);
+
+          const res = await fetch("/api/openai/transcribe", {
+            method: "POST",
+            headers: { "x-openai-key": settings.apiKey },
+            body: formData,
+          });
+
+          const data = await res.json();
+          if (data.text) {
+            await sendToChat(data.text, true);
+          } else {
+            addMessage("system", data.error?.message || "Transcription échouée.");
+          }
+        } catch {
+          addMessage("system", "Erreur lors de la transcription.");
+        } finally {
+          setIsLoading(false);
+        }
+      };
+
+      mediaRecorder.start(250);
+      setIsRecording(true);
+      setVisualizerState({ mode: "listening", levels: new Array(40).fill(0.3) });
+    } catch {
+      addMessage("system", "Impossible d'accéder au microphone. Vérifiez les permissions.");
     }
   };
 
@@ -91,18 +197,24 @@ export function CopilotPanel() {
           <VoiceVisualizer className="px-4" />
           <div className="border-t border-white/10 p-3">
             <div className="flex gap-2">
-              <Button variant="outline" size="icon" className="h-9 w-9 border-white/10 shrink-0">
-                <Mic className="h-4 w-4" />
+              <Button
+                variant={isRecording ? "destructive" : "outline"}
+                size="icon"
+                className={`h-9 w-9 shrink-0 ${isRecording ? "" : "border-white/10"}`}
+                onClick={toggleRecording}
+                disabled={isLoading}
+              >
+                {isRecording ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
               </Button>
               <Input
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && handleSend()}
-                placeholder={settings.apiKey ? "Message au copilote..." : "Configurez la clé API..."}
+                placeholder={isRecording ? "Écoute en cours..." : settings.apiKey ? "Message au copilote..." : "Configurez la clé API..."}
                 className="h-9 border-white/10 bg-transparent text-sm"
-                disabled={isLoading}
+                disabled={isLoading || isRecording}
               />
-              <Button size="icon" className="h-9 w-9 shrink-0" onClick={handleSend} disabled={isLoading}>
+              <Button size="icon" className="h-9 w-9 shrink-0" onClick={handleSend} disabled={isLoading || isRecording}>
                 {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
               </Button>
             </div>
