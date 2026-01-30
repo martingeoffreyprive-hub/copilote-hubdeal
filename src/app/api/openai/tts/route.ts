@@ -21,6 +21,8 @@ export async function POST(req: NextRequest) {
         model: "tts-1",
         input: body.input,
         voice: body.voice || "alloy",
+        response_format: "opus",
+        speed: body.speed || 1.05,
       }),
     });
 
@@ -29,14 +31,14 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(err, { status: response.status });
     }
 
-    const audioBuffer = await response.arrayBuffer();
-    return new NextResponse(audioBuffer, {
-      status: 200,
-      headers: {
-        "Content-Type": "audio/mpeg",
-        "Cache-Control": "no-cache",
-      },
+    // Stream the response directly for faster playback start
+    const headers = new Headers({
+      "Content-Type": "audio/ogg",
+      "Cache-Control": "no-cache",
+      "Transfer-Encoding": "chunked",
     });
+
+    return new NextResponse(response.body, { status: 200, headers });
   } catch {
     return NextResponse.json({ error: "Erreur TTS" }, { status: 500 });
   }

@@ -95,18 +95,26 @@ export function CopilotPanel() {
 
   const speakText = useCallback(async (text: string) => {
     if (!settings.autoSpeak || !settings.apiKey) return;
+    // Limit TTS to first 500 chars for speed
+    const shortText = text.length > 500 ? text.slice(0, 497) + "..." : text;
     try {
       setVisualizerState({ mode: "speaking", levels: new Array(40).fill(0.5) });
       const res = await fetch("/api/openai/tts", {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-openai-key": settings.apiKey },
-        body: JSON.stringify({ input: text.slice(0, 4096), voice: settings.voice }),
+        body: JSON.stringify({ input: shortText, voice: settings.voice, speed: 1.05 }),
       });
       if (res.ok) {
+        // Stream: create a blob from the streamed response for immediate playback
         const blob = await res.blob();
         const url = URL.createObjectURL(blob);
         const audio = new Audio(url);
+        audio.playbackRate = 1.0;
         audio.onended = () => {
+          URL.revokeObjectURL(url);
+          setVisualizerState({ mode: "idle", levels: new Array(40).fill(0.1) });
+        };
+        audio.onerror = () => {
           URL.revokeObjectURL(url);
           setVisualizerState({ mode: "idle", levels: new Array(40).fill(0.1) });
         };
@@ -130,21 +138,12 @@ export function CopilotPanel() {
     setIsLoading(true);
 
     try {
-      const systemPrompt = `Tu es un copilote AI pour artisans belges. Tu aides à créer et modifier des devis de construction/rénovation.
-Réponds toujours en français, de manière concise.
+      const systemPrompt = `Tu es un copilote vocal pour artisans belges. Tu modifies des devis en temps réel.
+RÉPONDS EN 1-2 PHRASES MAX. Sois bref et direct, c'est une interface vocale.
 
-RÈGLES TVA BELGES:
-- 6% : rénovation habitation privée >10 ans
-- 12% : logements sociaux
-- 21% : neuf, commercial, standard
+TVA BELGE: 6% rénovation >10 ans, 12% logement social, 21% standard/neuf.
 
-INSTRUCTIONS:
-- Quand l'utilisateur demande d'ajouter un poste/ligne/matériau, utilise la fonction add_row.
-- Quand il veut modifier un prix, une quantité, etc., utilise update_row avec le bon rowIndex.
-- Quand il veut supprimer, utilise delete_row.
-- Quand il donne des infos client, utilise set_client_info.
-- Propose des prix réalistes pour le marché belge si l'utilisateur ne précise pas.
-- Tu peux ajouter plusieurs lignes d'un coup en appelant add_row plusieurs fois.
+ACTIONS: utilise TOUJOURS les fonctions (add_row, update_row, delete_row, add_section, set_client_info, set_discount) quand l'utilisateur demande une modification. Propose des prix marché belge si non précisé. Tu peux appeler plusieurs fonctions d'un coup.
 
 ${buildQuoteSummary(quote)}`;
 
@@ -164,7 +163,7 @@ ${buildQuoteSummary(quote)}`;
           model: "gpt-4o-mini",
           messages: chatMessages,
           tools: QUOTE_TOOLS,
-          max_tokens: 2048,
+          max_tokens: 512,
         }),
       });
 
