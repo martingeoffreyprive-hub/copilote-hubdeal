@@ -14,6 +14,7 @@ import { Send, Mic, MicOff, Settings, X, Loader2 } from "lucide-react";
 import { QUOTE_TOOLS } from "@/lib/copilot-tools";
 import { formatCurrency } from "@/lib/calculations";
 import { validateDiscount } from "@/lib/validation";
+import { buildCatalogContext, formatCatalogResults } from "@/lib/catalog-search";
 import { Quote } from "@/types/quote";
 
 function buildQuoteSummary(q: Quote): string {
@@ -162,6 +163,9 @@ export function CopilotPanel() {
         quoteCtx.dispatch({ type: "UPDATE_FIELD", payload: { field: "projectDescription", value: args.description as string } });
         return "Description du projet mise à jour.";
       }
+      case "search_catalog": {
+        return formatCatalogResults((args.query as string) || "");
+      }
       case "undo": {
         if (!quoteCtx.canUndo) return "Rien à annuler.";
         quoteCtx.undo();
@@ -254,12 +258,9 @@ CALCUL DES QUANTITÉS:
 - "2 prises + 2 interrupteurs" → 2 pce + 2 pce
 - Toujours inclure la main d'œuvre (h ou forfait)
 
-PRIX INDICATIFS BELGES (HTVA):
-- Dépose carrelage: 12-18€/m² | Pose carrelage sol: 35-50€/m² | Carrelage fourniture: 25-60€/m²
-- Préparation/ragréage sol: 15-25€/m² | Plinthes: 8-15€/ml | Joint silicone: 5-10€/ml
-- Point électrique (prise/interrupteur): 80-120€/pce | Luminaire pose: 60-100€/pce
-- Câblage électrique: 15-25€/ml | Tableau électrique: 250-500€/forfait
-- Main d'œuvre générale: 40-55€/h | Évacuation gravats: 150-300€/forfait
+CATALOGUE DE PRIX:
+Tu disposes d'un catalogue exhaustif de prestations. Utilise la fonction search_catalog pour chercher un prix spécifique.
+${buildCatalogContext(text)}
 
 DÉCOMPOSITION TYPE:
 Pour chaque section: fourniture + main d'œuvre + finitions.

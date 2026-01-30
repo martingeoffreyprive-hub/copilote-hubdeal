@@ -133,6 +133,20 @@ export const QUOTE_TOOLS = [
   {
     type: "function" as const,
     function: {
+      name: "search_catalog",
+      description: "Rechercher dans le catalogue de prix. Utilise cette fonction quand tu as besoin du prix exact d'une prestation, d'un matériau ou d'un service spécifique.",
+      parameters: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "Mots-clés de recherche (ex: 'carrelage sol', 'douche italienne', 'prise électrique')" },
+        },
+        required: ["query"],
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
       name: "undo",
       description: "Annuler la dernière action sur le devis. Utilise quand l'utilisateur dit 'annule', 'reviens en arrière', 'undo'.",
       parameters: { type: "object", properties: {} },
