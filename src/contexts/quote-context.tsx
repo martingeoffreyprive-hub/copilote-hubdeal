@@ -17,7 +17,8 @@ type Action =
   | { type: "UPDATE_SECTION"; payload: { id: string; title: string } }
   | { type: "DELETE_SECTION"; payload: string }
   | { type: "SET_DISCOUNT"; payload: { value: number; type: "percent" | "fixed" } }
-  | { type: "UPDATE_FIELD"; payload: { field: string; value: string } };
+  | { type: "UPDATE_FIELD"; payload: { field: string; value: string } }
+  | { type: "ADD_ROW_WITH_DATA"; payload: { sectionId: string; designation: string; description: string; quantity: number; unit: string; unitPrice: number; tvaRate: number } };
 
 function createEmptyRow(sectionId: string): QuoteRow {
   return {
@@ -140,6 +141,25 @@ function quoteReducer(state: Quote, action: Action): Quote {
 
     case "UPDATE_FIELD":
       return { ...updated, [action.payload.field]: action.payload.value };
+
+    case "ADD_ROW_WITH_DATA": {
+      const { sectionId, designation, description, quantity, unit, unitPrice, tvaRate } = action.payload;
+      const row: QuoteRow = {
+        id: uuid(),
+        sectionId,
+        designation,
+        description,
+        quantity,
+        unit: unit as Unit,
+        unitPrice,
+        tvaRate: tvaRate as TVARate,
+        totalHT: 0,
+        totalTTC: 0,
+        auditStatus: "green",
+        auditMessage: "OK",
+      };
+      return { ...updated, rows: [...updated.rows, recalcRow(row)] };
+    }
 
     default:
       return state;
