@@ -87,7 +87,7 @@ export function TableRow({ row }: { row: QuoteRow }) {
             <DropdownMenuItem onClick={() => moveRow(row.id, "down")}>
               <ArrowDown className="mr-2 h-3.5 w-3.5" /> Descendre
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => deleteRow(row.id)} className="text-red-400">
+            <DropdownMenuItem onClick={() => { if (window.confirm(`Supprimer "${row.designation || "cette ligne"}" ?`)) deleteRow(row.id); }} className="text-red-400">
               <Trash2 className="mr-2 h-3.5 w-3.5" /> Supprimer
             </DropdownMenuItem>
           </DropdownMenuContent>

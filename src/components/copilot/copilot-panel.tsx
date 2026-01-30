@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Send, Mic, MicOff, Settings, X, Loader2 } from "lucide-react";
 import { QUOTE_TOOLS } from "@/lib/copilot-tools";
 import { formatCurrency } from "@/lib/calculations";
+import { validateDiscount } from "@/lib/validation";
 import { Quote } from "@/types/quote";
 
 function buildQuoteSummary(q: Quote): string {
@@ -71,6 +72,28 @@ export function CopilotPanel() {
       return batchSections?.[batchSections.length - 1]?.id || q.sections[0]?.id;
     };
 
+    // Resolve row by index or designation (fuzzy match)
+    const resolveRow = (args: Record<string, unknown>): { row: typeof q.rows[0]; idx: number } | string => {
+      if (args.rowIndex !== undefined) {
+        const idx = args.rowIndex as number;
+        const row = q.rows[idx];
+        if (!row) return `Erreur: ligne ${idx} introuvable (${q.rows.length} lignes au total).`;
+        return { row, idx };
+      }
+      if (args.rowDesignation) {
+        const search = (args.rowDesignation as string).toLowerCase();
+        // Exact match first
+        let idx = q.rows.findIndex((r) => r.designation.toLowerCase() === search);
+        // Partial match
+        if (idx < 0) idx = q.rows.findIndex((r) => r.designation.toLowerCase().includes(search));
+        // Reverse partial
+        if (idx < 0) idx = q.rows.findIndex((r) => search.includes(r.designation.toLowerCase()) && r.designation.length > 0);
+        if (idx < 0) return `Erreur: aucune ligne trouvée pour "${args.rowDesignation}".`;
+        return { row: q.rows[idx], idx };
+      }
+      return "Erreur: rowIndex ou rowDesignation requis.";
+    };
+
     switch (name) {
       case "add_row": {
         const sectionId = resolveSection(args.sectionId as string);
@@ -91,9 +114,9 @@ export function CopilotPanel() {
         return `Ligne ajoutée: ${args.designation} - ${args.quantity} ${args.unit} x ${args.unitPrice}€ = ${ht.toFixed(2)}€ HT (TVA ${args.tvaRate}%)`;
       }
       case "update_row": {
-        const idx = args.rowIndex as number;
-        const row = q.rows[idx];
-        if (!row) return `Erreur: ligne ${idx} introuvable (${q.rows.length} lignes au total).`;
+        const resolved = resolveRow(args);
+        if (typeof resolved === "string") return resolved;
+        const { row, idx } = resolved;
         if (args.designation !== undefined) updateRow(row.id, "designation", args.designation);
         if (args.quantity !== undefined) updateRow(row.id, "quantity", args.quantity);
         if (args.unit !== undefined) updateRow(row.id, "unit", args.unit);
@@ -102,9 +125,9 @@ export function CopilotPanel() {
         return `Ligne ${idx} ("${row.designation}") mise à jour.`;
       }
       case "delete_row": {
-        const idx = args.rowIndex as number;
-        const row = q.rows[idx];
-        if (!row) return `Erreur: ligne ${idx} introuvable.`;
+        const resolved = resolveRow(args);
+        if (typeof resolved === "string") return resolved;
+        const { row, idx } = resolved;
         deleteRow(row.id);
         return `Ligne ${idx} ("${row.designation}") supprimée.`;
       }
@@ -123,8 +146,13 @@ export function CopilotPanel() {
         return "Infos client mises à jour.";
       }
       case "set_discount": {
-        quoteCtx.dispatch({ type: "SET_DISCOUNT", payload: { value: args.value as number, type: args.type as "percent" | "fixed" } });
-        return `Remise ${args.value}${args.type === "percent" ? "%" : "€"} appliquée.`;
+        const discountVal = args.value as number;
+        const discountType = args.type as "percent" | "fixed";
+        const totalHT = q.rows.reduce((sum, r) => sum + r.totalHT, 0);
+        const check = validateDiscount(discountVal, discountType, totalHT);
+        if (!check.valid) return `Erreur: ${check.message}`;
+        quoteCtx.dispatch({ type: "SET_DISCOUNT", payload: { value: discountVal, type: discountType } });
+        return `Remise ${discountVal}${discountType === "percent" ? "%" : "€"} appliquée.`;
       }
       case "set_notes": {
         quoteCtx.dispatch({ type: "UPDATE_FIELD", payload: { field: "notes", value: args.notes as string } });
@@ -133,6 +161,16 @@ export function CopilotPanel() {
       case "set_project_description": {
         quoteCtx.dispatch({ type: "UPDATE_FIELD", payload: { field: "projectDescription", value: args.description as string } });
         return "Description du projet mise à jour.";
+      }
+      case "undo": {
+        if (!quoteCtx.canUndo) return "Rien à annuler.";
+        quoteCtx.undo();
+        return "Dernière action annulée.";
+      }
+      case "redo": {
+        if (!quoteCtx.canRedo) return "Rien à rétablir.";
+        quoteCtx.redo();
+        return "Action rétablie.";
       }
       default:
         return `Fonction inconnue: ${name}`;
@@ -208,7 +246,7 @@ FONCTIONS DISPONIBLES:
 - add_section: créer une section (TOUJOURS créer les sections AVANT les lignes)
 - add_row: ajouter une ligne avec sectionId, designation, quantity, unit, unitPrice, tvaRate
 - update_row: modifier une ligne (par rowIndex = numéro N° affiché dans l'aperçu, commence à 0)
-- delete_row: supprimer une ligne
+- delete_row: supprimer une ligne. IMPORTANT: Avant de supprimer, CONFIRME toujours avec l'utilisateur en lui demandant "Voulez-vous vraiment supprimer [désignation] ?" SAUF s'il a explicitement dit "supprime" ou "enlève".
 - set_client_info: nom, adresse, email, téléphone du client
 - set_discount: remise globale (percent ou fixed)
 - set_notes: notes/conditions (ex: "Validité 30 jours. Acompte 30%.")
@@ -216,6 +254,15 @@ FONCTIONS DISPONIBLES:
 
 Tu peux et DOIS appeler PLUSIEURS fonctions en un seul message. Génère le devis COMPLET en une fois.
 RÉPONDS ensuite en 1-2 phrases pour confirmer ce qui a été ajouté avec le total estimé.
+
+SUGGESTIONS PROACTIVES:
+Après avoir généré ou modifié un devis, analyse le contenu et suggère les améliorations possibles:
+- Postes manquants courants (ex: évacuation gravats, nettoyage chantier, protection sols existants)
+- Sections incomplètes (ex: section sans main d'œuvre)
+- Incohérences de TVA (mélange 6% et 21% sans raison)
+- Notes/conditions manquantes (validité, acompte, délai)
+- Infos client incomplètes
+Formule tes suggestions en une ligne à la fin de ta réponse, ex: "💡 Suggestion: ajouter évacuation gravats et nettoyage chantier ?"
 
 ${buildQuoteSummary(currentQuote)}`;
 
@@ -288,12 +335,10 @@ ${buildQuoteSummary(currentQuote)}`;
         }
       } catch { /* use fallback */ }
       addMessage("assistant", reply);
-      if (isVoice || settings.autoSpeak) speakText(reply);
     } else if (choice.message?.content) {
       addMessage("assistant", choice.message.content);
-      if (isVoice || settings.autoSpeak) speakText(choice.message.content);
     }
-  }, [settings.apiKey, settings.autoSpeak, addMessage, speakText, executeTool]);
+  }, [settings.apiKey, addMessage, executeTool]);
 
   const sendToChat = useCallback(async (text: string, isVoice = false) => {
     if (!text.trim()) return;

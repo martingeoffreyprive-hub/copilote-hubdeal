@@ -21,7 +21,7 @@ export function SectionRow({ section }: { section: QuoteSection }) {
           <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => addRow(section.id)}>
             <Plus className="h-3.5 w-3.5" />
           </Button>
-          <Button variant="ghost" size="icon" className="h-7 w-7 text-red-400 hover:text-red-300" onClick={() => deleteSection(section.id)}>
+          <Button variant="ghost" size="icon" className="h-7 w-7 text-red-400 hover:text-red-300" onClick={() => { if (window.confirm(`Supprimer la section "${section.title}" et toutes ses lignes ?`)) deleteSection(section.id); }}>
             <Trash2 className="h-3.5 w-3.5" />
           </Button>
         </div>

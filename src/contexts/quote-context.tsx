@@ -19,7 +19,9 @@ type Action =
   | { type: "DELETE_SECTION"; payload: string }
   | { type: "SET_DISCOUNT"; payload: { value: number; type: "percent" | "fixed" } }
   | { type: "UPDATE_FIELD"; payload: { field: string; value: string } }
-  | { type: "ADD_ROW_WITH_DATA"; payload: { sectionId: string; designation: string; description: string; quantity: number; unit: string; unitPrice: number; tvaRate: number } };
+  | { type: "ADD_ROW_WITH_DATA"; payload: { sectionId: string; designation: string; description: string; quantity: number; unit: string; unitPrice: number; tvaRate: number } }
+  | { type: "UNDO" }
+  | { type: "REDO" };
 
 function createEmptyRow(sectionId: string): QuoteRow {
   return {
@@ -69,7 +71,17 @@ function createDefaultQuote(): Quote {
   };
 }
 
-function quoteReducer(state: Quote, action: Action): Quote {
+// Actions that should NOT create an undo snapshot (too granular)
+const NO_HISTORY_ACTIONS = new Set(["UPDATE_ROW", "UPDATE_FIELD", "UPDATE_SECTION", "SET_QUOTE", "UNDO", "REDO"]);
+const MAX_HISTORY = 50;
+
+interface UndoableState {
+  quote: Quote;
+  past: Quote[];
+  future: Quote[];
+}
+
+function quoteReducerCore(state: Quote, action: Action): Quote {
   const updated = { ...state, updatedAt: new Date().toISOString() };
 
   switch (action.type) {
@@ -176,6 +188,41 @@ function quoteReducer(state: Quote, action: Action): Quote {
   }
 }
 
+function undoableReducer(state: UndoableState, action: Action): UndoableState {
+  if (action.type === "UNDO") {
+    if (state.past.length === 0) return state;
+    const previous = state.past[state.past.length - 1];
+    return {
+      quote: previous,
+      past: state.past.slice(0, -1),
+      future: [state.quote, ...state.future],
+    };
+  }
+  if (action.type === "REDO") {
+    if (state.future.length === 0) return state;
+    const next = state.future[0];
+    return {
+      quote: next,
+      past: [...state.past, state.quote],
+      future: state.future.slice(1),
+    };
+  }
+
+  const newQuote = quoteReducerCore(state.quote, action);
+  if (newQuote === state.quote) return state;
+
+  // Only push to history for significant actions
+  if (NO_HISTORY_ACTIONS.has(action.type)) {
+    return { ...state, quote: newQuote };
+  }
+
+  return {
+    quote: newQuote,
+    past: [...state.past.slice(-MAX_HISTORY), state.quote],
+    future: [], // clear redo on new action
+  };
+}
+
 interface QuoteContextValue {
   quote: Quote;
   totals: QuoteTotals;
@@ -188,12 +235,22 @@ interface QuoteContextValue {
   addSection: (title?: string) => void;
   updateSection: (id: string, title: string) => void;
   deleteSection: (id: string) => void;
+  undo: () => void;
+  redo: () => void;
+  canUndo: boolean;
+  canRedo: boolean;
 }
 
 const QuoteContext = createContext<QuoteContextValue | null>(null);
 
 export function QuoteProvider({ children, initialQuote }: { children: React.ReactNode; initialQuote?: Quote }) {
-  const [quote, dispatch] = useReducer(quoteReducer, initialQuote || createDefaultQuote());
+  const [state, dispatch] = useReducer(undoableReducer, {
+    quote: initialQuote || createDefaultQuote(),
+    past: [],
+    future: [],
+  });
+
+  const { quote } = state;
 
   const totals = useMemo(
     () => calcQuoteTotals(quote.rows, quote.globalDiscount, quote.globalDiscountType),
@@ -208,9 +265,11 @@ export function QuoteProvider({ children, initialQuote }: { children: React.Reac
   const addSection = useCallback((title?: string) => dispatch({ type: "ADD_SECTION", payload: title ? { title } : undefined }), []);
   const updateSection = useCallback((id: string, title: string) => dispatch({ type: "UPDATE_SECTION", payload: { id, title } }), []);
   const deleteSection = useCallback((id: string) => dispatch({ type: "DELETE_SECTION", payload: id }), []);
+  const undo = useCallback(() => dispatch({ type: "UNDO" }), []);
+  const redo = useCallback(() => dispatch({ type: "REDO" }), []);
 
   return (
-    <QuoteContext.Provider value={{ quote, totals, dispatch, addRow, updateRow, deleteRow, duplicateRow, moveRow, addSection, updateSection, deleteSection }}>
+    <QuoteContext.Provider value={{ quote, totals, dispatch, addRow, updateRow, deleteRow, duplicateRow, moveRow, addSection, updateSection, deleteSection, undo, redo, canUndo: state.past.length > 0, canRedo: state.future.length > 0 }}>
       {children}
     </QuoteContext.Provider>
   );

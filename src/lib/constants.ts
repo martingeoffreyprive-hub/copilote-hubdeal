@@ -46,7 +46,7 @@ export const DEFAULT_COPILOT_SETTINGS = {
   voice: "alloy",
   model: "gpt-4o-realtime-preview",
   language: "fr" as Language,
-  autoSpeak: true,
+  autoSpeak: false,
 };
 
 export const DEFAULT_IBAN = "BE68 5390 0754 7034";

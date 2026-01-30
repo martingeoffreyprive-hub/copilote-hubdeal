@@ -26,18 +26,19 @@ export const QUOTE_TOOLS = [
     type: "function" as const,
     function: {
       name: "update_row",
-      description: "Modifier une ligne existante du devis. Utilise cette fonction quand l'utilisateur veut changer le prix, la quantité, la désignation, etc. d'une ligne existante.",
+      description: "Modifier une ligne existante du devis. Utilise cette fonction quand l'utilisateur veut changer le prix, la quantité, la désignation, etc. d'une ligne existante. Tu peux identifier la ligne par son index OU par sa désignation.",
       parameters: {
         type: "object",
         properties: {
-          rowIndex: { type: "number", description: "Numéro de la ligne (commence à 0)" },
+          rowIndex: { type: "number", description: "Numéro de la ligne (commence à 0). Optionnel si rowDesignation est fourni." },
+          rowDesignation: { type: "string", description: "Nom/désignation de la ligne à modifier (correspondance partielle, ex: 'carrelage sol'). Utilisé si rowIndex non fourni." },
           designation: { type: "string", description: "Nouvelle désignation" },
           quantity: { type: "number", description: "Nouvelle quantité" },
           unit: { type: "string", enum: ["m²", "m³", "ml", "pce", "h", "forfait", "kg", "l", "jour"] },
           unitPrice: { type: "number", description: "Nouveau prix unitaire HTVA" },
           tvaRate: { type: "number", enum: [0, 6, 12, 21], description: "Nouveau taux TVA" },
         },
-        required: ["rowIndex"],
+        required: [],
       },
     },
   },
@@ -45,13 +46,14 @@ export const QUOTE_TOOLS = [
     type: "function" as const,
     function: {
       name: "delete_row",
-      description: "Supprimer une ligne du devis.",
+      description: "Supprimer une ligne du devis. Tu peux identifier la ligne par son index OU par sa désignation.",
       parameters: {
         type: "object",
         properties: {
-          rowIndex: { type: "number", description: "Numéro de la ligne à supprimer (commence à 0)" },
+          rowIndex: { type: "number", description: "Numéro de la ligne à supprimer (commence à 0). Optionnel si rowDesignation est fourni." },
+          rowDesignation: { type: "string", description: "Nom/désignation de la ligne à supprimer (correspondance partielle)." },
         },
-        required: ["rowIndex"],
+        required: [],
       },
     },
   },
@@ -126,6 +128,22 @@ export const QUOTE_TOOLS = [
         },
         required: ["description"],
       },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "undo",
+      description: "Annuler la dernière action sur le devis. Utilise quand l'utilisateur dit 'annule', 'reviens en arrière', 'undo'.",
+      parameters: { type: "object", properties: {} },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "redo",
+      description: "Rétablir la dernière action annulée. Utilise quand l'utilisateur dit 'rétablis', 'redo', 'remets'.",
+      parameters: { type: "object", properties: {} },
     },
   },
 ];
