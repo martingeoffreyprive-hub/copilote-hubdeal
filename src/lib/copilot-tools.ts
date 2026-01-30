@@ -100,4 +100,32 @@ export const QUOTE_TOOLS = [
       },
     },
   },
+  {
+    type: "function" as const,
+    function: {
+      name: "set_notes",
+      description: "Ajouter ou modifier les notes/conditions générales du devis.",
+      parameters: {
+        type: "object",
+        properties: {
+          notes: { type: "string", description: "Texte des notes ou conditions (ex: 'Validité 30 jours. Acompte 30% à la commande.')" },
+        },
+        required: ["notes"],
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "set_project_description",
+      description: "Définir la description du projet/chantier.",
+      parameters: {
+        type: "object",
+        properties: {
+          description: { type: "string", description: "Description du projet (ex: 'Rénovation salle de bain complète')" },
+        },
+        required: ["description"],
+      },
+    },
+  },
 ];

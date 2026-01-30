@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { useCopilotContext } from "@/contexts/copilot-context";
 import { useQuoteContext } from "@/contexts/quote-context";
 import { GlassCard } from "@/components/ui/glass-card";
@@ -15,87 +15,108 @@ import { QUOTE_TOOLS } from "@/lib/copilot-tools";
 import { formatCurrency } from "@/lib/calculations";
 import { Quote } from "@/types/quote";
 
-function buildQuoteSummary(quote: Quote): string {
-  const lines = quote.rows.map((r, i) =>
-    `[${i}] ${r.designation || "(vide)"} | ${r.quantity} ${r.unit} x ${r.unitPrice}€ = ${formatCurrency(r.totalHT)} HT (TVA ${r.tvaRate}%)`
+function buildQuoteSummary(q: Quote): string {
+  const lines = q.rows.map((r, i) =>
+    `[${i}] ${r.designation || "(vide)"} | qté:${r.quantity} ${r.unit} | PU:${r.unitPrice}€ | HT:${formatCurrency(r.totalHT)} | TVA:${r.tvaRate}%`
   ).join("\n");
-  const sections = quote.sections.map((s) => `- ${s.title} (id: ${s.id})`).join("\n");
-  return `ÉTAT ACTUEL DU DEVIS (réf: ${quote.reference}):
-Client: ${quote.clientName || "(non défini)"}
-Adresse: ${quote.clientAddress || "(non défini)"}
+  const sections = q.sections.map((s) => `- "${s.title}" (id: ${s.id})`).join("\n");
+  return `DEVIS ACTUEL (réf: ${q.reference}):
+Client: ${q.clientName || "(vide)"} | Adresse: ${q.clientAddress || "(vide)"} | Tél: ${q.clientPhone || "(vide)"} | Email: ${q.clientEmail || "(vide)"}
 Sections:\n${sections || "(aucune)"}
-Lignes:\n${lines || "(aucune ligne)"}
-Remise: ${quote.globalDiscount}${quote.globalDiscountType === "percent" ? "%" : "€"}`;
+${q.rows.length} ligne(s):\n${lines || "(vide)"}
+Remise: ${q.globalDiscount}${q.globalDiscountType === "percent" ? "%" : "€"}
+Notes: ${q.notes || "(vide)"}`;
 }
 
 export function CopilotPanel() {
   const { messages, settings, addMessage, setVisualizerState } = useCopilotContext();
-  const { quote, updateRow, deleteRow, addSection, dispatch } = useQuoteContext();
+  const quoteCtx = useQuoteContext();
   const [input, setInput] = useState("");
   const [showSettings, setShowSettings] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
+  // Use refs to avoid stale closures
+  const quoteRef = useRef(quoteCtx.quote);
+  const messagesRef = useRef(messages);
+  const isLoadingRef = useRef(false);
 
-  // Execute a tool call from OpenAI on the quote
+  useEffect(() => { quoteRef.current = quoteCtx.quote; }, [quoteCtx.quote]);
+  useEffect(() => { messagesRef.current = messages; }, [messages]);
+  useEffect(() => { isLoadingRef.current = isLoading; }, [isLoading]);
+
   const executeTool = useCallback((name: string, args: Record<string, unknown>): string => {
+    const q = quoteRef.current;
+    const { updateRow, deleteRow, addSection, dispatch } = quoteCtx;
+
     switch (name) {
       case "add_row": {
-        const sectionId = (args.sectionId as string) || quote.sections[0]?.id;
-        if (!sectionId) return "Erreur: aucune section disponible.";
-        const designation = args.designation as string;
-        const quantity = args.quantity as number;
-        const unit = args.unit as string;
-        const unitPrice = args.unitPrice as number;
-        const tvaRate = args.tvaRate as number;
+        const sectionId = (args.sectionId as string) || q.sections[0]?.id;
+        if (!sectionId) return "Erreur: aucune section.";
         dispatch({
           type: "ADD_ROW_WITH_DATA",
-          payload: { sectionId, designation, description: (args.description as string) || "", quantity, unit, unitPrice, tvaRate },
+          payload: {
+            sectionId,
+            designation: (args.designation as string) || "",
+            description: (args.description as string) || "",
+            quantity: (args.quantity as number) || 1,
+            unit: (args.unit as string) || "pce",
+            unitPrice: (args.unitPrice as number) || 0,
+            tvaRate: (args.tvaRate as number) || 21,
+          },
         });
-        return `Ligne ajoutée: ${designation} - ${quantity} ${unit} x ${unitPrice}€ (TVA ${tvaRate}%)`;
+        return `Ligne ajoutée: ${args.designation} - ${args.quantity} ${args.unit} x ${args.unitPrice}€ (TVA ${args.tvaRate}%)`;
       }
       case "update_row": {
         const idx = args.rowIndex as number;
-        const row = quote.rows[idx];
-        if (!row) return `Erreur: ligne ${idx} introuvable (${quote.rows.length} lignes).`;
+        const row = q.rows[idx];
+        if (!row) return `Erreur: ligne ${idx} introuvable (${q.rows.length} lignes au total).`;
         if (args.designation !== undefined) updateRow(row.id, "designation", args.designation);
         if (args.quantity !== undefined) updateRow(row.id, "quantity", args.quantity);
         if (args.unit !== undefined) updateRow(row.id, "unit", args.unit);
         if (args.unitPrice !== undefined) updateRow(row.id, "unitPrice", args.unitPrice);
         if (args.tvaRate !== undefined) updateRow(row.id, "tvaRate", args.tvaRate);
-        return `Ligne ${idx} mise à jour.`;
+        return `Ligne ${idx} ("${row.designation}") mise à jour.`;
       }
       case "delete_row": {
         const idx = args.rowIndex as number;
-        const row = quote.rows[idx];
+        const row = q.rows[idx];
         if (!row) return `Erreur: ligne ${idx} introuvable.`;
         deleteRow(row.id);
-        return `Ligne ${idx} (${row.designation}) supprimée.`;
+        return `Ligne ${idx} ("${row.designation}") supprimée.`;
       }
       case "add_section": {
         addSection(args.title as string);
         return `Section "${args.title}" ajoutée.`;
       }
       case "set_client_info": {
-        if (args.clientName) dispatch({ type: "UPDATE_FIELD", payload: { field: "clientName", value: args.clientName as string } });
-        if (args.clientAddress) dispatch({ type: "UPDATE_FIELD", payload: { field: "clientAddress", value: args.clientAddress as string } });
-        if (args.clientEmail) dispatch({ type: "UPDATE_FIELD", payload: { field: "clientEmail", value: args.clientEmail as string } });
-        if (args.clientPhone) dispatch({ type: "UPDATE_FIELD", payload: { field: "clientPhone", value: args.clientPhone as string } });
-        return "Informations client mises à jour.";
+        const { dispatch: d } = quoteCtx;
+        if (args.clientName) d({ type: "UPDATE_FIELD", payload: { field: "clientName", value: args.clientName as string } });
+        if (args.clientAddress) d({ type: "UPDATE_FIELD", payload: { field: "clientAddress", value: args.clientAddress as string } });
+        if (args.clientEmail) d({ type: "UPDATE_FIELD", payload: { field: "clientEmail", value: args.clientEmail as string } });
+        if (args.clientPhone) d({ type: "UPDATE_FIELD", payload: { field: "clientPhone", value: args.clientPhone as string } });
+        return "Infos client mises à jour.";
       }
       case "set_discount": {
-        dispatch({ type: "SET_DISCOUNT", payload: { value: args.value as number, type: args.type as "percent" | "fixed" } });
-        return `Remise de ${args.value}${args.type === "percent" ? "%" : "€"} appliquée.`;
+        quoteCtx.dispatch({ type: "SET_DISCOUNT", payload: { value: args.value as number, type: args.type as "percent" | "fixed" } });
+        return `Remise ${args.value}${args.type === "percent" ? "%" : "€"} appliquée.`;
+      }
+      case "set_notes": {
+        quoteCtx.dispatch({ type: "UPDATE_FIELD", payload: { field: "notes", value: args.notes as string } });
+        return "Notes mises à jour.";
+      }
+      case "set_project_description": {
+        quoteCtx.dispatch({ type: "UPDATE_FIELD", payload: { field: "projectDescription", value: args.description as string } });
+        return "Description du projet mise à jour.";
       }
       default:
         return `Fonction inconnue: ${name}`;
     }
-  }, [quote, updateRow, deleteRow, addSection, dispatch]);
+  }, [quoteCtx]);
 
   const speakText = useCallback(async (text: string) => {
     if (!settings.autoSpeak || !settings.apiKey) return;
-    // Limit TTS to first 500 chars for speed
     const shortText = text.length > 500 ? text.slice(0, 497) + "..." : text;
     try {
       setVisualizerState({ mode: "speaking", levels: new Array(40).fill(0.5) });
@@ -105,19 +126,11 @@ export function CopilotPanel() {
         body: JSON.stringify({ input: shortText, voice: settings.voice, speed: 1.05 }),
       });
       if (res.ok) {
-        // Stream: create a blob from the streamed response for immediate playback
         const blob = await res.blob();
         const url = URL.createObjectURL(blob);
         const audio = new Audio(url);
-        audio.playbackRate = 1.0;
-        audio.onended = () => {
-          URL.revokeObjectURL(url);
-          setVisualizerState({ mode: "idle", levels: new Array(40).fill(0.1) });
-        };
-        audio.onerror = () => {
-          URL.revokeObjectURL(url);
-          setVisualizerState({ mode: "idle", levels: new Array(40).fill(0.1) });
-        };
+        audio.onended = () => { URL.revokeObjectURL(url); setVisualizerState({ mode: "idle", levels: new Array(40).fill(0.1) }); };
+        audio.onerror = () => { URL.revokeObjectURL(url); setVisualizerState({ mode: "idle", levels: new Array(40).fill(0.1) }); };
         await audio.play();
       } else {
         setVisualizerState({ mode: "idle", levels: new Array(40).fill(0.1) });
@@ -128,9 +141,10 @@ export function CopilotPanel() {
   }, [settings.autoSpeak, settings.apiKey, settings.voice, setVisualizerState]);
 
   const sendToChat = useCallback(async (text: string, isVoice = false) => {
-    if (!text.trim() || isLoading) return;
+    if (!text.trim()) return;
+    if (isLoadingRef.current) return;
     if (!settings.apiKey) {
-      addMessage("system", "Veuillez d'abord entrer votre clé API OpenAI dans les paramètres (icône engrenage).");
+      addMessage("system", "Ajoutez votre clé API OpenAI dans les paramètres (icône engrenage).");
       return;
     }
 
@@ -138,18 +152,30 @@ export function CopilotPanel() {
     setIsLoading(true);
 
     try {
+      const currentQuote = quoteRef.current;
+      const currentMessages = messagesRef.current;
+
       const systemPrompt = `Tu es un copilote vocal pour artisans belges. Tu modifies des devis en temps réel.
-RÉPONDS EN 1-2 PHRASES MAX. Sois bref et direct, c'est une interface vocale.
+RÉPONDS EN 1-2 PHRASES MAX. Sois bref et direct.
 
 TVA BELGE: 6% rénovation >10 ans, 12% logement social, 21% standard/neuf.
+ACTIONS: utilise TOUJOURS les fonctions quand l'utilisateur demande une modification.
+- add_row: ajouter une ligne (poste, matériau, main d'oeuvre...)
+- update_row: modifier une ligne existante (par rowIndex, commence à 0)
+- delete_row: supprimer une ligne
+- add_section: ajouter une section
+- set_client_info: info client (nom, adresse, email, téléphone)
+- set_discount: remise globale
+- set_notes: notes/conditions du devis
+- set_project_description: description du projet
 
-ACTIONS: utilise TOUJOURS les fonctions (add_row, update_row, delete_row, add_section, set_client_info, set_discount) quand l'utilisateur demande une modification. Propose des prix marché belge si non précisé. Tu peux appeler plusieurs fonctions d'un coup.
+Propose des prix réalistes marché belge si non précisé. Tu peux appeler plusieurs fonctions.
 
-${buildQuoteSummary(quote)}`;
+${buildQuoteSummary(currentQuote)}`;
 
       const chatMessages = [
         { role: "system" as const, content: systemPrompt },
-        ...messages.filter((m) => m.role !== "system").slice(-20).map((m) => ({
+        ...currentMessages.filter((m) => m.role !== "system").slice(-15).map((m) => ({
           role: m.role as "user" | "assistant",
           content: m.content,
         })),
@@ -163,7 +189,7 @@ ${buildQuoteSummary(quote)}`;
           model: "gpt-4o-mini",
           messages: chatMessages,
           tools: QUOTE_TOOLS,
-          max_tokens: 512,
+          max_tokens: 1024,
         }),
       });
 
@@ -171,49 +197,51 @@ ${buildQuoteSummary(quote)}`;
 
       if (!res.ok) {
         addMessage("system", data.error?.message || data.error || `Erreur ${res.status}`);
-        setIsLoading(false);
         return;
       }
 
       const choice = data.choices?.[0];
-      if (!choice) {
-        addMessage("system", "Réponse inattendue de l'API.");
-        setIsLoading(false);
-        return;
-      }
+      if (!choice) { addMessage("system", "Réponse inattendue."); return; }
 
-      // Handle tool calls
       if (choice.message?.tool_calls?.length) {
         const toolResults: string[] = [];
-        for (const toolCall of choice.message.tool_calls) {
-          const args = JSON.parse(toolCall.function.arguments);
-          const result = executeTool(toolCall.function.name, args);
-          toolResults.push(result);
+        for (const tc of choice.message.tool_calls) {
+          try {
+            const args = JSON.parse(tc.function.arguments);
+            toolResults.push(executeTool(tc.function.name, args));
+          } catch (e) {
+            toolResults.push(`Erreur parsing: ${e instanceof Error ? e.message : "inconnue"}`);
+          }
         }
 
-        // Send tool results back to get a natural language summary
-        const followUp = await fetch("/api/openai", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "x-openai-key": settings.apiKey },
-          body: JSON.stringify({
-            model: "gpt-4o-mini",
-            messages: [
-              ...chatMessages,
-              choice.message,
-              ...choice.message.tool_calls.map((tc: { id: string; function: { name: string } }, i: number) => ({
-                role: "tool" as const,
-                tool_call_id: tc.id,
-                content: toolResults[i],
-              })),
-            ],
-            max_tokens: 512,
-          }),
-        });
-
-        const followData = await followUp.json();
-        const reply = followData.choices?.[0]?.message?.content || toolResults.join("\n");
-        addMessage("assistant", reply);
-        if (isVoice || settings.autoSpeak) speakText(reply);
+        // Get natural language summary
+        try {
+          const followUp = await fetch("/api/openai", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "x-openai-key": settings.apiKey },
+            body: JSON.stringify({
+              model: "gpt-4o-mini",
+              messages: [
+                ...chatMessages,
+                choice.message,
+                ...choice.message.tool_calls.map((tc: { id: string }, i: number) => ({
+                  role: "tool" as const,
+                  tool_call_id: tc.id,
+                  content: toolResults[i],
+                })),
+              ],
+              max_tokens: 256,
+            }),
+          });
+          const followData = await followUp.json();
+          const reply = followData.choices?.[0]?.message?.content || toolResults.join(" | ");
+          addMessage("assistant", reply);
+          if (isVoice || settings.autoSpeak) speakText(reply);
+        } catch {
+          const fallback = toolResults.join(" | ");
+          addMessage("assistant", fallback);
+          if (isVoice || settings.autoSpeak) speakText(fallback);
+        }
       } else if (choice.message?.content) {
         addMessage("assistant", choice.message.content);
         if (isVoice || settings.autoSpeak) speakText(choice.message.content);
@@ -223,10 +251,11 @@ ${buildQuoteSummary(quote)}`;
     } finally {
       setIsLoading(false);
     }
-  }, [isLoading, settings, messages, quote, addMessage, speakText, executeTool]);
+  }, [settings.apiKey, settings.autoSpeak, addMessage, speakText, executeTool]);
 
   const handleSend = () => {
-    const text = input;
+    const text = input.trim();
+    if (!text) return;
     setInput("");
     sendToChat(text);
   };
@@ -237,51 +266,59 @@ ${buildQuoteSummary(quote)}`;
       return;
     }
     if (!settings.apiKey) {
-      addMessage("system", "Veuillez d'abord entrer votre clé API OpenAI dans les paramètres.");
+      addMessage("system", "Ajoutez votre clé API OpenAI dans les paramètres.");
       return;
     }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream, {
-        mimeType: MediaRecorder.isTypeSupported("audio/webm;codecs=opus") ? "audio/webm;codecs=opus" : "audio/webm",
-      });
-      mediaRecorderRef.current = mediaRecorder;
+      const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus") ? "audio/webm;codecs=opus" : "audio/webm";
+      const recorder = new MediaRecorder(stream, { mimeType });
+      mediaRecorderRef.current = recorder;
       chunksRef.current = [];
-      mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
-      mediaRecorder.onstop = async () => {
+
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) chunksRef.current.push(e.data);
+      };
+
+      recorder.onstop = async () => {
         stream.getTracks().forEach((t) => t.stop());
         setIsRecording(false);
         setVisualizerState({ mode: "idle", levels: new Array(40).fill(0.1) });
-        const audioBlob = new Blob(chunksRef.current, { type: "audio/webm" });
-        if (audioBlob.size < 100) return;
+
+        const audioBlob = new Blob(chunksRef.current, { type: mimeType });
+        if (audioBlob.size < 200) return;
+
         setIsLoading(true);
         try {
           const formData = new FormData();
           formData.append("file", audioBlob, "audio.webm");
           formData.append("language", settings.language);
+
           const res = await fetch("/api/openai/transcribe", {
             method: "POST",
             headers: { "x-openai-key": settings.apiKey },
             body: formData,
           });
           const data = await res.json();
-          if (data.text) {
+
+          if (data.text && data.text.trim()) {
             setIsLoading(false);
-            await sendToChat(data.text, true);
+            await sendToChat(data.text.trim(), true);
           } else {
-            addMessage("system", data.error?.message || "Transcription échouée.");
+            addMessage("system", data.error?.message || "Aucun texte détecté. Réessayez.");
             setIsLoading(false);
           }
         } catch {
-          addMessage("system", "Erreur lors de la transcription.");
+          addMessage("system", "Erreur transcription.");
           setIsLoading(false);
         }
       };
-      mediaRecorder.start(250);
+
+      recorder.start(500);
       setIsRecording(true);
       setVisualizerState({ mode: "listening", levels: new Array(40).fill(0.3) });
     } catch {
-      addMessage("system", "Impossible d'accéder au microphone. Vérifiez les permissions.");
+      addMessage("system", "Microphone inaccessible. Vérifiez les permissions du navigateur.");
     }
   };
 
