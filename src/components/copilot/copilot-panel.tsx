@@ -207,7 +207,7 @@ Par défaut utilise 21% sauf si l'utilisateur précise rénovation >10 ans (alor
 FONCTIONS DISPONIBLES:
 - add_section: créer une section (TOUJOURS créer les sections AVANT les lignes)
 - add_row: ajouter une ligne avec sectionId, designation, quantity, unit, unitPrice, tvaRate
-- update_row: modifier une ligne (par rowIndex, commence à 0)
+- update_row: modifier une ligne (par rowIndex = numéro N° affiché dans l'aperçu, commence à 0)
 - delete_row: supprimer une ligne
 - set_client_info: nom, adresse, email, téléphone du client
 - set_discount: remise globale (percent ou fixed)

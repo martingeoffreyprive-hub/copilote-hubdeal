@@ -191,6 +191,7 @@ export function PdfPreview() {
         <table className="w-full text-xs">
           <thead>
             <tr className="bg-white/5 text-muted-foreground text-[10px] uppercase tracking-wider">
+              <th className="p-2 text-center w-8">N°</th>
               <th className="p-2 text-left">Désignation</th>
               <th className="p-2 text-right w-14">Qté</th>
               <th className="p-2 text-center w-14">Unité</th>
@@ -200,16 +201,20 @@ export function PdfPreview() {
             </tr>
           </thead>
           <tbody>
-            {sectionRows.map(({ section, rows }) => (
+            {sectionRows.map(({ section, rows }, sIdx) => (
               <tr key={`section-group-${section.id}`}>
-                <td colSpan={6} className="p-0">
+                <td colSpan={7} className="p-0">
                   <table className="w-full">
                     <tbody>
                       <tr className="bg-white/[0.03]">
+                        <td className="p-2 text-xs font-semibold text-blue-400/60 w-8 text-center">{sIdx + 1}</td>
                         <td colSpan={6} className="p-2 text-xs font-semibold text-blue-400">{section.title}</td>
                       </tr>
-                      {rows.map((row) => (
+                      {rows.map((row) => {
+                        const globalIdx = quote.rows.indexOf(row);
+                        return (
                         <tr key={row.id} className="border-t border-white/5">
+                          <td className="p-2 text-center text-muted-foreground/50 font-mono text-[10px] w-8">{globalIdx}</td>
                           <td className="p-2">{row.designation || "—"}</td>
                           <td className="p-2 text-right">{row.quantity}</td>
                           <td className="p-2 text-center">{row.unit}</td>
@@ -217,7 +222,8 @@ export function PdfPreview() {
                           <td className="p-2 text-right">{row.tvaRate}%</td>
                           <td className="p-2 text-right font-medium">{formatCurrency(row.totalHT)}</td>
                         </tr>
-                      ))}
+                        );
+                      })}
                     </tbody>
                   </table>
                 </td>
