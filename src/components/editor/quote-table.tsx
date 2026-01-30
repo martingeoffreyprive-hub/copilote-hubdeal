@@ -1,5 +1,6 @@
 "use client";
 
+import React from "react";
 import { useQuoteContext } from "@/contexts/quote-context";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { GlassCard } from "@/components/ui/glass-card";
@@ -29,12 +30,17 @@ export function QuoteTable() {
             </tr>
           </thead>
           <tbody>
-            {quote.sections.map((section) => (
-              <SectionRow key={section.id} section={section} />
-            ))}
-            {quote.rows.map((row) => (
-              <TableRow key={row.id} row={row} />
-            ))}
+            {quote.sections.map((section) => {
+              const sectionRows = quote.rows.filter((r) => r.sectionId === section.id);
+              return (
+                <React.Fragment key={section.id}>
+                  <SectionRow section={section} />
+                  {sectionRows.map((row) => (
+                    <TableRow key={row.id} row={row} />
+                  ))}
+                </React.Fragment>
+              );
+            })}
           </tbody>
         </table>
       </ScrollArea>
