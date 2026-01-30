@@ -45,13 +45,35 @@ export function CopilotPanel() {
   useEffect(() => { quoteRef.current = quoteCtx.quote; }, [quoteCtx.quote]);
   useEffect(() => { messagesRef.current = messages; }, [messages]);
 
-  const executeTool = useCallback((name: string, args: Record<string, unknown>): string => {
+  const executeTool = useCallback((name: string, args: Record<string, unknown>, batchSections?: { title: string; id: string }[]): string => {
     const q = quoteRef.current;
-    const { updateRow, deleteRow, addSection, dispatch } = quoteCtx;
+    const { updateRow, deleteRow, dispatch } = quoteCtx;
+
+    // Resolve sectionId: try exact ID, then match by title in existing + batch sections
+    const resolveSection = (input?: string): string | undefined => {
+      if (!input) return q.sections[0]?.id || batchSections?.[0]?.id;
+      // Check existing sections by ID
+      if (q.sections.find((s) => s.id === input)) return input;
+      // Check batch sections by ID
+      if (batchSections?.find((s) => s.id === input)) return input;
+      // Match by title (case-insensitive)
+      const lower = input.toLowerCase();
+      const existing = q.sections.find((s) => s.title.toLowerCase() === lower);
+      if (existing) return existing.id;
+      const batch = batchSections?.find((s) => s.title.toLowerCase() === lower);
+      if (batch) return batch.id;
+      // Partial match
+      const partial = q.sections.find((s) => s.title.toLowerCase().includes(lower));
+      if (partial) return partial.id;
+      const partialBatch = batchSections?.find((s) => s.title.toLowerCase().includes(lower));
+      if (partialBatch) return partialBatch.id;
+      // Fallback to last batch section or first existing
+      return batchSections?.[batchSections.length - 1]?.id || q.sections[0]?.id;
+    };
 
     switch (name) {
       case "add_row": {
-        const sectionId = (args.sectionId as string) || q.sections[0]?.id;
+        const sectionId = resolveSection(args.sectionId as string);
         if (!sectionId) return "Erreur: aucune section.";
         dispatch({
           type: "ADD_ROW_WITH_DATA",
@@ -65,7 +87,8 @@ export function CopilotPanel() {
             tvaRate: (args.tvaRate as number) || 21,
           },
         });
-        return `Ligne ajoutée: ${args.designation} - ${args.quantity} ${args.unit} x ${args.unitPrice}€ (TVA ${args.tvaRate}%)`;
+        const ht = ((args.quantity as number) || 1) * ((args.unitPrice as number) || 0);
+        return `Ligne ajoutée: ${args.designation} - ${args.quantity} ${args.unit} x ${args.unitPrice}€ = ${ht.toFixed(2)}€ HT (TVA ${args.tvaRate}%)`;
       }
       case "update_row": {
         const idx = args.rowIndex as number;
@@ -86,8 +109,10 @@ export function CopilotPanel() {
         return `Ligne ${idx} ("${row.designation}") supprimée.`;
       }
       case "add_section": {
-        addSection(args.title as string);
-        return `Section "${args.title}" ajoutée.`;
+        const newId = crypto.randomUUID();
+        dispatch({ type: "ADD_SECTION_WITH_ID", payload: { id: newId, title: (args.title as string) || "Section" } });
+        batchSections?.push({ title: (args.title as string) || "Section", id: newId });
+        return `Section "${args.title}" ajoutée (id: ${newId}).`;
       }
       case "set_client_info": {
         const { dispatch: d } = quoteCtx;
@@ -144,21 +169,53 @@ export function CopilotPanel() {
     const currentQuote = quoteRef.current;
     const currentMessages = messagesRef.current;
 
-    const systemPrompt = `Tu es un copilote vocal pour artisans belges. Tu modifies des devis en temps réel.
-RÉPONDS EN 1-2 PHRASES MAX. Sois bref et direct.
+    const systemPrompt = `Tu es un copilote expert pour artisans belges. Tu génères et modifies des devis COMPLETS en temps réel.
 
-TVA BELGE: 6% rénovation >10 ans, 12% logement social, 21% standard/neuf.
-ACTIONS: utilise TOUJOURS les fonctions quand l'utilisateur demande une modification.
-- add_row: ajouter une ligne (poste, matériau, main d'oeuvre...)
-- update_row: modifier une ligne existante (par rowIndex, commence à 0)
+RÈGLE ABSOLUE: Quand l'utilisateur décrit un projet ou des travaux, tu DOIS:
+1. Appeler add_section pour CHAQUE corps de métier (Démolition, Carrelage, Électricité, etc.)
+2. Appeler add_row pour CHAQUE poste avec TOUS les champs remplis:
+   - designation: description précise du poste
+   - quantity: calculée à partir des dimensions données (ex: 5x8m = 40m²)
+   - unit: l'unité adaptée (m², ml, pce, h, forfait, etc.)
+   - unitPrice: prix unitaire réaliste marché belge HTVA
+   - tvaRate: 6 pour rénovation habitation >10 ans, 21 pour neuf/standard
+3. Appeler set_project_description avec un résumé du projet
+
+CALCUL DES QUANTITÉS - EXEMPLES:
+- "5x8 mètres" → surface = 40 m² pour le sol, périmètre = 26 ml pour les plinthes
+- "2 prises + 2 interrupteurs" → 2 pce prises, 2 pce interrupteurs
+- Toujours ajouter la main d'œuvre en heures (h) ou forfait
+
+PRIX INDICATIFS BELGES (HTVA):
+- Dépose carrelage: 12-18€/m² | Pose carrelage sol: 35-50€/m² | Carrelage fourniture: 25-60€/m²
+- Préparation/ragréage sol: 15-25€/m² | Plinthes: 8-15€/ml | Joint silicone: 5-10€/ml
+- Point électrique (prise/interrupteur): 80-120€/pce | Luminaire pose: 60-100€/pce
+- Câblage électrique: 15-25€/ml | Tableau électrique: 250-500€/forfait
+- Main d'œuvre générale: 40-55€/h | Évacuation gravats: 150-300€/forfait
+
+DÉCOMPOSITION TYPE D'UN PROJET:
+Pour chaque section, inclure: fourniture matériaux + main d'œuvre pose + finitions.
+Exemple "rénovation carrelage garage 5x8m":
+→ Section "Démolition": dépose ancien carrelage 40m², évacuation gravats forfait
+→ Section "Préparation sols": ragréage/mise à niveau 40m², primaire d'accrochage 40m²
+→ Section "Carrelage": fourniture carrelage 40m² (+10% coupe), pose carrelage 40m², plinthes 26ml, joints
+→ Section "Finitions": nettoyage chantier forfait
+
+TVA BELGE: 6% rénovation habitation >10 ans, 12% logement social, 21% standard/neuf.
+Par défaut utilise 21% sauf si l'utilisateur précise rénovation >10 ans (alors 6%).
+
+FONCTIONS DISPONIBLES:
+- add_section: créer une section (TOUJOURS créer les sections AVANT les lignes)
+- add_row: ajouter une ligne avec sectionId, designation, quantity, unit, unitPrice, tvaRate
+- update_row: modifier une ligne (par rowIndex, commence à 0)
 - delete_row: supprimer une ligne
-- add_section: ajouter une section
-- set_client_info: info client (nom, adresse, email, téléphone)
-- set_discount: remise globale
-- set_notes: notes/conditions du devis
-- set_project_description: description du projet
+- set_client_info: nom, adresse, email, téléphone du client
+- set_discount: remise globale (percent ou fixed)
+- set_notes: notes/conditions (ex: "Validité 30 jours. Acompte 30%.")
+- set_project_description: description du chantier
 
-Propose des prix réalistes marché belge si non précisé. Tu peux appeler plusieurs fonctions.
+Tu peux et DOIS appeler PLUSIEURS fonctions en un seul message. Génère le devis COMPLET en une fois.
+RÉPONDS ensuite en 1-2 phrases pour confirmer ce qui a été ajouté avec le total estimé.
 
 ${buildQuoteSummary(currentQuote)}`;
 
@@ -178,7 +235,7 @@ ${buildQuoteSummary(currentQuote)}`;
         model: "gpt-4o-mini",
         messages: chatMessages,
         tools: QUOTE_TOOLS,
-        max_tokens: 1024,
+        max_tokens: 4096,
       }),
     });
 
@@ -193,11 +250,13 @@ ${buildQuoteSummary(currentQuote)}`;
     if (!choice) { addMessage("system", "Réponse inattendue."); return; }
 
     if (choice.message?.tool_calls?.length) {
+      // Track sections created during this batch so add_row can reference them
+      const batchSections: { title: string; id: string }[] = [];
       const toolResults: string[] = [];
       for (const tc of choice.message.tool_calls) {
         try {
           const args = JSON.parse(tc.function.arguments);
-          toolResults.push(executeTool(tc.function.name, args));
+          toolResults.push(executeTool(tc.function.name, args, batchSections));
         } catch (e) {
           toolResults.push(`Erreur parsing: ${e instanceof Error ? e.message : "inconnue"}`);
         }

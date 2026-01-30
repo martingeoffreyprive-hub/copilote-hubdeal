@@ -10,7 +10,7 @@ export const QUOTE_TOOLS = [
       parameters: {
         type: "object",
         properties: {
-          sectionId: { type: "string", description: "ID de la section. Si non spécifié, utilise la première section." },
+          sectionId: { type: "string", description: "Titre ou ID de la section cible (ex: 'Démolition', 'Carrelage'). Si non spécifié, utilise la dernière section créée." },
           designation: { type: "string", description: "Nom/description du poste (ex: 'Carrelage sol 60x60')" },
           description: { type: "string", description: "Description détaillée optionnelle" },
           quantity: { type: "number", description: "Quantité (ex: 25)" },

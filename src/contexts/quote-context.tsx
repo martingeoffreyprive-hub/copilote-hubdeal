@@ -14,6 +14,7 @@ type Action =
   | { type: "DUPLICATE_ROW"; payload: string }
   | { type: "MOVE_ROW"; payload: { id: string; direction: "up" | "down" } }
   | { type: "ADD_SECTION"; payload?: { title: string } }
+  | { type: "ADD_SECTION_WITH_ID"; payload: { id: string; title: string } }
   | { type: "UPDATE_SECTION"; payload: { id: string; title: string } }
   | { type: "DELETE_SECTION"; payload: string }
   | { type: "SET_DISCOUNT"; payload: { value: number; type: "percent" | "fixed" } }
@@ -118,6 +119,15 @@ function quoteReducer(state: Quote, action: Action): Quote {
       const newSection: QuoteSection = {
         id: uuid(),
         title: action.payload?.title || `Section ${updated.sections.length + 1}`,
+        order: updated.sections.length,
+      };
+      return { ...updated, sections: [...updated.sections, newSection] };
+    }
+
+    case "ADD_SECTION_WITH_ID": {
+      const newSection: QuoteSection = {
+        id: action.payload.id,
+        title: action.payload.title,
         order: updated.sections.length,
       };
       return { ...updated, sections: [...updated.sections, newSection] };
