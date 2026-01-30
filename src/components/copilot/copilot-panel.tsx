@@ -7,6 +7,7 @@ import { GlassCard } from "@/components/ui/glass-card";
 import { MessageList } from "./message-list";
 import { CopilotSettings } from "./copilot-settings";
 import { VoiceVisualizer } from "@/components/voice-visualizer/voice-visualizer";
+import { QuoteMiniPreview } from "./quote-mini-preview";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Send, Mic, MicOff, Settings, X, Loader2 } from "lucide-react";
@@ -302,6 +303,7 @@ ${buildQuoteSummary(quote)}`;
       ) : (
         <>
           <MessageList />
+          <QuoteMiniPreview />
           <VoiceVisualizer className="px-4" />
           <div className="border-t border-white/10 p-3">
             <div className="flex gap-2">
