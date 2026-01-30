@@ -20,7 +20,7 @@ function buildQuoteSummary(q: Quote): string {
   const lines = q.rows.map((r, i) =>
     `[${i}] ${r.designation || "(vide)"} | qté:${r.quantity} ${r.unit} | PU:${r.unitPrice}€ | HT:${formatCurrency(r.totalHT)} | TVA:${r.tvaRate}%`
   ).join("\n");
-  const sections = q.sections.map((s) => `- "${s.title}" (id: ${s.id})`).join("\n");
+  const sections = q.sections.map((s, i) => `${String.fromCharCode(65 + i)}. "${s.title}" (id: ${s.id})`).join("\n");
   return `DEVIS ACTUEL (réf: ${q.reference}):
 Client: ${q.clientName || "(vide)"} | Adresse: ${q.clientAddress || "(vide)"} | Tél: ${q.clientPhone || "(vide)"} | Email: ${q.clientEmail || "(vide)"}
 Sections:\n${sections || "(aucune)"}
@@ -221,19 +221,24 @@ Termine par: "✅ Ce résumé est correct ? Confirmez ou corrigez."
 
 **ÉTAPE 2 — Validation des sections:**
 Quand l'utilisateur confirme l'étape 1 (dit "oui", "ok", "c'est bon", "correct", "confirme", etc.):
-N'appelle AUCUNE fonction. Propose la liste des sections prévues, numérotées:
-1. Section "Démolition"
-2. Section "Préparation sols"
-3. Section "Carrelage"
+N'appelle AUCUNE fonction. Propose la liste des sections prévues, annotées par LETTRES (ordre alphabétique):
+A. Carrelage
+B. Électricité
+C. Plafonnage
+D. Préparation sols
 etc.
+Les sections = catégories de travaux (corps de métier). Exemples: Électricité, Carrelage, Plafonnage, Toiture, Cuisine équipée, Châssis, Plomberie, Démolition, Peinture, Menuiserie, Isolation, Sanitaires, HVAC, Maçonnerie, etc.
+Trie les sections par ordre alphabétique et attribue une lettre A, B, C...
 Termine par: "📋 Ces sections sont correctes ? Vous pouvez modifier les noms, en ajouter ou en supprimer."
 
 **ÉTAPE 3 — Génération complète:**
 Quand l'utilisateur confirme les sections (dit "oui", "ok", "c'est bon", "go", "génère", etc.):
 MAINTENANT tu appelles les fonctions. Tu DOIS:
-1. Appeler add_section pour CHAQUE section confirmée
-2. Appeler add_row pour CHAQUE poste avec TOUS les champs:
-   - designation: description précise
+1. Appeler add_section pour CHAQUE section confirmée (= catégorie de travaux), dans l'ORDRE ALPHABÉTIQUE
+2. Appeler add_row pour CHAQUE poste dans chaque section. Les lignes servent à:
+   - Décrire chaque prestation/poste de travail (main d'œuvre pose, dépose, préparation, finitions...)
+   - Lister les matériaux/articles/fournitures nécessaires (carrelage, câbles, prises, enduit...)
+   - Chaque ligne a: designation, quantity, unit, unitPrice, tvaRate
    - quantity: calculée à partir des dimensions (ex: 5x8m = 40m²)
    - unit: unité adaptée (m², ml, pce, h, forfait, etc.)
    - unitPrice: prix unitaire réaliste marché belge HTVA

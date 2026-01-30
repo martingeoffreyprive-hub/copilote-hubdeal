@@ -207,7 +207,7 @@ export function PdfPreview() {
                   <table className="w-full">
                     <tbody>
                       <tr className="bg-white/[0.03]">
-                        <td className="p-2 text-xs font-semibold text-blue-400/60 w-8 text-center">{sIdx + 1}</td>
+                        <td className="p-2 text-xs font-semibold text-blue-400/60 w-8 text-center">{String.fromCharCode(65 + sIdx)}</td>
                         <td colSpan={6} className="p-2 text-xs font-semibold text-blue-400">{section.title}</td>
                       </tr>
                       {rows.map((row) => {
