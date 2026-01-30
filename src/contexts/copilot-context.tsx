@@ -32,11 +32,7 @@ function loadSettings(): CopilotSettings {
 
 export function CopilotProvider({ children }: { children: React.ReactNode }) {
   const [messages, setMessages] = useState<CopilotMessage[]>([]);
-  const [settings, setSettings] = useState<CopilotSettings>(DEFAULT_COPILOT_SETTINGS);
-
-  useEffect(() => {
-    setSettings(loadSettings());
-  }, []);
+  const [settings, setSettings] = useState<CopilotSettings>(() => loadSettings());
   const [visualizerState, setVisualizerState] = useState<VisualizerState>({ mode: "idle", levels: new Array(40).fill(0.1) });
   const [isConnected, setConnected] = useState(false);
 

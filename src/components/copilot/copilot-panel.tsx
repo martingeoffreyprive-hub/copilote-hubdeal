@@ -40,11 +40,10 @@ export function CopilotPanel() {
   // Use refs to avoid stale closures
   const quoteRef = useRef(quoteCtx.quote);
   const messagesRef = useRef(messages);
-  const isLoadingRef = useRef(false);
+  const busyRef = useRef(false);
 
   useEffect(() => { quoteRef.current = quoteCtx.quote; }, [quoteCtx.quote]);
   useEffect(() => { messagesRef.current = messages; }, [messages]);
-  useEffect(() => { isLoadingRef.current = isLoading; }, [isLoading]);
 
   const executeTool = useCallback((name: string, args: Record<string, unknown>): string => {
     const q = quoteRef.current;
@@ -140,22 +139,12 @@ export function CopilotPanel() {
     }
   }, [settings.autoSpeak, settings.apiKey, settings.voice, setVisualizerState]);
 
-  const sendToChat = useCallback(async (text: string, isVoice = false) => {
-    if (!text.trim()) return;
-    if (isLoadingRef.current) return;
-    if (!settings.apiKey) {
-      addMessage("system", "Ajoutez votre clé API OpenAI dans les paramètres (icône engrenage).");
-      return;
-    }
+  // Core chat function — does NOT manage isLoading itself, caller is responsible
+  const processChat = useCallback(async (text: string, isVoice: boolean) => {
+    const currentQuote = quoteRef.current;
+    const currentMessages = messagesRef.current;
 
-    addMessage("user", text.trim(), isVoice);
-    setIsLoading(true);
-
-    try {
-      const currentQuote = quoteRef.current;
-      const currentMessages = messagesRef.current;
-
-      const systemPrompt = `Tu es un copilote vocal pour artisans belges. Tu modifies des devis en temps réel.
+    const systemPrompt = `Tu es un copilote vocal pour artisans belges. Tu modifies des devis en temps réel.
 RÉPONDS EN 1-2 PHRASES MAX. Sois bref et direct.
 
 TVA BELGE: 6% rénovation >10 ans, 12% logement social, 21% standard/neuf.
@@ -173,85 +162,101 @@ Propose des prix réalistes marché belge si non précisé. Tu peux appeler plus
 
 ${buildQuoteSummary(currentQuote)}`;
 
-      const chatMessages = [
-        { role: "system" as const, content: systemPrompt },
-        ...currentMessages.filter((m) => m.role !== "system").slice(-15).map((m) => ({
-          role: m.role as "user" | "assistant",
-          content: m.content,
-        })),
-        { role: "user" as const, content: text.trim() },
-      ];
+    const chatMessages = [
+      { role: "system" as const, content: systemPrompt },
+      ...currentMessages.filter((m) => m.role !== "system").slice(-15).map((m) => ({
+        role: m.role as "user" | "assistant",
+        content: m.content,
+      })),
+      { role: "user" as const, content: text },
+    ];
 
-      const res = await fetch("/api/openai", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-openai-key": settings.apiKey },
-        body: JSON.stringify({
-          model: "gpt-4o-mini",
-          messages: chatMessages,
-          tools: QUOTE_TOOLS,
-          max_tokens: 1024,
-        }),
-      });
+    const res = await fetch("/api/openai", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-openai-key": settings.apiKey },
+      body: JSON.stringify({
+        model: "gpt-4o-mini",
+        messages: chatMessages,
+        tools: QUOTE_TOOLS,
+        max_tokens: 1024,
+      }),
+    });
 
-      const data = await res.json();
+    const data = await res.json();
 
-      if (!res.ok) {
-        addMessage("system", data.error?.message || data.error || `Erreur ${res.status}`);
-        return;
-      }
+    if (!res.ok) {
+      addMessage("system", data.error?.message || data.error || `Erreur ${res.status}`);
+      return;
+    }
 
-      const choice = data.choices?.[0];
-      if (!choice) { addMessage("system", "Réponse inattendue."); return; }
+    const choice = data.choices?.[0];
+    if (!choice) { addMessage("system", "Réponse inattendue."); return; }
 
-      if (choice.message?.tool_calls?.length) {
-        const toolResults: string[] = [];
-        for (const tc of choice.message.tool_calls) {
-          try {
-            const args = JSON.parse(tc.function.arguments);
-            toolResults.push(executeTool(tc.function.name, args));
-          } catch (e) {
-            toolResults.push(`Erreur parsing: ${e instanceof Error ? e.message : "inconnue"}`);
-          }
-        }
-
-        // Get natural language summary
+    if (choice.message?.tool_calls?.length) {
+      const toolResults: string[] = [];
+      for (const tc of choice.message.tool_calls) {
         try {
-          const followUp = await fetch("/api/openai", {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "x-openai-key": settings.apiKey },
-            body: JSON.stringify({
-              model: "gpt-4o-mini",
-              messages: [
-                ...chatMessages,
-                choice.message,
-                ...choice.message.tool_calls.map((tc: { id: string }, i: number) => ({
-                  role: "tool" as const,
-                  tool_call_id: tc.id,
-                  content: toolResults[i],
-                })),
-              ],
-              max_tokens: 256,
-            }),
-          });
-          const followData = await followUp.json();
-          const reply = followData.choices?.[0]?.message?.content || toolResults.join(" | ");
-          addMessage("assistant", reply);
-          if (isVoice || settings.autoSpeak) speakText(reply);
-        } catch {
-          const fallback = toolResults.join(" | ");
-          addMessage("assistant", fallback);
-          if (isVoice || settings.autoSpeak) speakText(fallback);
+          const args = JSON.parse(tc.function.arguments);
+          toolResults.push(executeTool(tc.function.name, args));
+        } catch (e) {
+          toolResults.push(`Erreur parsing: ${e instanceof Error ? e.message : "inconnue"}`);
         }
-      } else if (choice.message?.content) {
-        addMessage("assistant", choice.message.content);
-        if (isVoice || settings.autoSpeak) speakText(choice.message.content);
       }
+
+      // Get natural language summary
+      let reply = toolResults.join(" | ");
+      try {
+        const followUp = await fetch("/api/openai", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-openai-key": settings.apiKey },
+          body: JSON.stringify({
+            model: "gpt-4o-mini",
+            messages: [
+              ...chatMessages,
+              choice.message,
+              ...choice.message.tool_calls.map((tc: { id: string }, i: number) => ({
+                role: "tool" as const,
+                tool_call_id: tc.id,
+                content: toolResults[i],
+              })),
+            ],
+            max_tokens: 256,
+          }),
+        });
+        if (followUp.ok) {
+          const followData = await followUp.json();
+          reply = followData.choices?.[0]?.message?.content || reply;
+        }
+      } catch { /* use fallback */ }
+      addMessage("assistant", reply);
+      if (isVoice || settings.autoSpeak) speakText(reply);
+    } else if (choice.message?.content) {
+      addMessage("assistant", choice.message.content);
+      if (isVoice || settings.autoSpeak) speakText(choice.message.content);
+    }
+  }, [settings.apiKey, settings.autoSpeak, addMessage, speakText, executeTool]);
+
+  const sendToChat = useCallback(async (text: string, isVoice = false) => {
+    if (!text.trim()) return;
+    if (busyRef.current) return;
+    if (!settings.apiKey) {
+      addMessage("system", "Ajoutez votre clé API OpenAI dans les paramètres (icône engrenage).");
+      return;
+    }
+
+    busyRef.current = true;
+    addMessage("user", text.trim(), isVoice);
+    setIsLoading(true);
+
+    try {
+      await processChat(text.trim(), isVoice);
     } catch (err) {
       addMessage("system", `Erreur: ${err instanceof Error ? err.message : "inconnue"}`);
     } finally {
+      busyRef.current = false;
       setIsLoading(false);
     }
-  }, [settings.apiKey, settings.autoSpeak, addMessage, speakText, executeTool]);
+  }, [settings.apiKey, addMessage, processChat]);
 
   const handleSend = () => {
     const text = input.trim();
@@ -288,7 +293,10 @@ ${buildQuoteSummary(currentQuote)}`;
         const audioBlob = new Blob(chunksRef.current, { type: mimeType });
         if (audioBlob.size < 200) return;
 
+        // Show loading during transcription + chat
+        busyRef.current = true;
         setIsLoading(true);
+
         try {
           const formData = new FormData();
           formData.append("file", audioBlob, "audio.webm");
@@ -299,17 +307,25 @@ ${buildQuoteSummary(currentQuote)}`;
             headers: { "x-openai-key": settings.apiKey },
             body: formData,
           });
+
+          if (!res.ok) {
+            const errData = await res.json().catch(() => ({}));
+            addMessage("system", errData.error?.message || errData.error || `Erreur transcription (${res.status})`);
+            return;
+          }
+
           const data = await res.json();
 
           if (data.text && data.text.trim()) {
-            setIsLoading(false);
-            await sendToChat(data.text.trim(), true);
+            addMessage("user", data.text.trim(), true);
+            await processChat(data.text.trim(), true);
           } else {
-            addMessage("system", data.error?.message || "Aucun texte détecté. Réessayez.");
-            setIsLoading(false);
+            addMessage("system", "Aucun texte détecté. Réessayez.");
           }
         } catch {
           addMessage("system", "Erreur transcription.");
+        } finally {
+          busyRef.current = false;
           setIsLoading(false);
         }
       };
